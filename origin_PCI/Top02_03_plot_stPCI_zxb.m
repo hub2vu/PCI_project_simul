@@ -35,23 +35,24 @@ absDR_dB = [45 90];
 bPrintStats = true;
 
 %% ========================= Load data =========================
-stFolder = dir(['../Data_tus/' num2str(folderidx,'%02d') '*']);
-if isempty(stFolder)
-    error('Data_tus 폴더를 찾을 수 없습니다. 경로를 확인하세요: ../Data_tus/%02d*', folderidx);
+% Data_tus/01_sim 경로 직접 지정
+sessPath = '../Data_tus/01_sim';
+if ~exist(sessPath, 'dir')
+    error('데이터 폴더를 찾을 수 없습니다: %s', sessPath);
 end
-sFolderName = stFolder.name;
+sFolderName = '01_sim';
 
 % Load P
-load([stFolder.folder '/' stFolder.name '/P.mat'],'P');
+load(fullfile(sessPath, 'P.mat'), 'P');
 
 % PciData path
-sPciPath = [stFolder.folder '/' stFolder.name '/PciData/'];
+sPciPath = fullfile(sessPath, 'PciData');
 if ~exist(sPciPath,'dir'); mkdir(sPciPath); end
 
 % Load stPCI
 nEig_s = 10;
 nEig_e = 90;
-load([sPciPath '/' 'stPCI_zxb' '_eig' num2str(nEig_s) 'to' num2str(nEig_e) '.mat'], 'stPCI');
+load(fullfile(sPciPath, ['stPCI_zxb_eig' num2str(nEig_s) 'to' num2str(nEig_e) '.mat']), 'stPCI');
 
 stG       = stPCI.stG;
 vPCI_zxb  = stPCI.vPCI_zxb;   % (z,x,b) power-like map (linear)

@@ -5,70 +5,24 @@
 % 뇌 혈관 슬라이스 이미지와 PCI를 오버레이하여 비디오 생성
 % make_sources_from_slice.py에서 사용한 SLICE_IDX와 동일한 슬라이스 사용
 %
-% 사용법:
-%   1. 프로젝트 루트 구조: P.mat, RfData/, PciData/, vessel_sweep_out/이 루트에 있음
-%   2. DATA_ROOT를 빈 문자열로 두면 프로젝트 루트 구조 사용
-%
 clear; close all;
 
 % ====== 경로 설정 ======
-scriptDir = fileparts(mfilename('fullpath'));
-projectRoot = fileparts(scriptDir);  % origin_PCI의 상위 폴더 = 프로젝트 루트
-
-addpath(fullfile(projectRoot, 'src'));
+addpath('../src');
 
 %% ================ 설정 ================
-% 시뮬레이션에 사용된 슬라이스 인덱스 (make_sources_from_slice.py의 SLICE_IDX와 일치)
+% 시뮬레이션에 사용된 슬라이스 인덱스 (make_sources_from_slice_v2.py의 SLICE_IDX와 일치)
 SLICE_IDX = 14;
 
-% ====== 데이터 경로 설정 ======
-DATA_ROOT = '';  % 빈 문자열이면 프로젝트 루트 사용
+% Data_tus/01_sim 경로 직접 지정
+dataFolder = '../Data_tus/01_sim';
+sFolderName = '01_sim';
+sVesselDir = '../vessel_sweep_out';
 
-if isempty(DATA_ROOT)
-    % 프로젝트 루트 구조
-    dataFolder = projectRoot;
-    sFolderName = 'sim';
-    sVesselDir = fullfile(projectRoot, 'vessel_sweep_out');
-else
-    % Data_tus 구조
-    folderidx = 1;
-    stFolder = dir(fullfile(DATA_ROOT, [num2str(folderidx,'%02d') '*']));
-    if isempty(stFolder)
-        error('Data 폴더를 찾을 수 없습니다: %s/%02d*', DATA_ROOT, folderidx);
-    end
-    dataFolder = fullfile(stFolder.folder, stFolder.name);
-    sFolderName = stFolder.name;
-    sVesselDir = fullfile(projectRoot, 'vessel_sweep_out');
+if ~exist(dataFolder, 'dir')
+    error('데이터 폴더를 찾을 수 없습니다: %s', dataFolder);
 end
 
-%% ================ 좌표계 오프셋 계산 (sources.mat 기반) ================
-% sources.mat에서 실제 사용된 소스 좌표 범위를 읽어서 오프셋 계산
-% 이렇게 하면 시뮬레이션에서 사용한 좌표계와 정확히 일치
-%
-% PCI Z축: 트랜스듀서로부터의 깊이 (약 1.58mm에서 시작)
-% Vessel Z축: 뇌 표면 기준 (0mm에서 시작)
-
-% sources.mat 로드하여 FUS focus 정보 확인
-sSourcesFile = fullfile(projectRoot, 'sources.mat');
-if exist(sSourcesFile, 'file')
-    stSources = load(sSourcesFile);
-    nFocus_z0_mm = double(stSources.z0_mm);  % FUS focus Z 위치 (PCI 좌표계)
-    src_z_range = [min(stSources.src_z_mm), max(stSources.src_z_mm)];
-    disp(['Sources.mat loaded: FUS focus z0 = ', num2str(nFocus_z0_mm), ' mm']);
-    disp(['Source Z range: ', num2str(src_z_range(1)), ' ~ ', num2str(src_z_range(2)), ' mm']);
-    
-    % 오프셋 자동 계산: 소스의 Z 중심이 PCI 영역 중심과 맞도록
-    % (또는 수동으로 조정 가능)
-    nZoffset_mm = mean(src_z_range);  % 소스 Z 범위 중심 기준
-    disp(['Auto-calculated Z offset: ', num2str(nZoffset_mm), ' mm']);
-else
-    % sources.mat이 없으면 기본값 사용
-    nZoffset_mm = 3.5;
-    disp(['sources.mat not found. Using default Z offset: ', num2str(nZoffset_mm), ' mm']);
-end
-
-% 수동 오프셋 조정 (필요시 아래 값을 변경)
-% nZoffset_mm = 4.5;  % 수동 조정 값
 
 %% ================ 혈관 슬라이스 로드 ================
 disp('Loading vessel slice data...');
@@ -91,26 +45,9 @@ mVessel = readNPY(sVesselFile);
 mVessel = double(mVessel);
 [nZ_vessel, nX_vessel] = size(mVessel);
 
-% 좌표 계산 (make_sources_from_slice.py와 동일한 방식)
-OUT_UM = meta.OUT_UM;  % 3.0 um
-um_to_mm = 1e-3;
-um_to_m = 1e-6;
 
-% x 좌표: 중심 기준 (mm)
-aX_vessel_mm = ((0:nX_vessel-1) - nX_vessel/2) * OUT_UM * um_to_mm;
-% z 좌표: 0부터 시작 (mm) + 오프셋 적용
-aZ_vessel_mm = (0:nZ_vessel-1) * OUT_UM * um_to_mm + nZoffset_mm;
-
-% 그리드 구조체 생성 (interpImg 호환용)
-stG_vessel.aX = double(aX_vessel_mm * 1e-3);  % [수정] double 강제 형변환
-stG_vessel.aZ = double(aZ_vessel_mm * 1e-3);
-stG_vessel.nXdim = nX_vessel;
-stG_vessel.nZdim = nZ_vessel;
 
 disp(['Vessel slice loaded: ', num2str(nZ_vessel), ' x ', num2str(nX_vessel)]);
-disp(['X range: ', num2str(aX_vessel_mm(1)), ' ~ ', num2str(aX_vessel_mm(end)), ' mm']);
-disp(['Z range (with offset): ', num2str(aZ_vessel_mm(1)), ' ~ ', num2str(aZ_vessel_mm(end)), ' mm']);
-disp(['Z offset applied: ', num2str(nZoffset_mm), ' mm']);
 
 %% ================ PCI 데이터 로드 ================
 disp('Loading PCI data...');
@@ -140,6 +77,24 @@ end
 disp(['PCI loaded: ', num2str(size(vPCI,1)), ' x ', num2str(size(vPCI,2)), ' x ', num2str(size(vPCI,3)), ' bursts']);
 disp(['PCI X range: ', num2str(stG_pci.aX(1)*1e3), ' ~ ', num2str(stG_pci.aX(end)*1e3), ' mm']);
 disp(['PCI Z range: ', num2str(stG_pci.aZ(1)*1e3), ' ~ ', num2str(stG_pci.aZ(end)*1e3), ' mm']);
+%% ================ (핵심) Vessel 좌표계를 PCI 좌표계에 맞춰 재정의 ================
+% Vessel 이미지는 픽셀 단위(3um)로 생성된 단면이지만,
+% overlay에서는 "같은 좌표계"로 놓여야 함.
+% -> stG_pci의 (aX/aZ) 범위에 vessel 이미지가 선형으로 매핑되도록 정의.
+
+aX_pci_m = stG_pci.aX(:);
+aZ_pci_m = stG_pci.aZ(:);
+
+stG_vessel.aX = linspace(min(aX_pci_m), max(aX_pci_m), nX_vessel);
+stG_vessel.aZ = linspace(min(aZ_pci_m), max(aZ_pci_m), nZ_vessel);
+stG_vessel.nXdim = nX_vessel;
+stG_vessel.nZdim = nZ_vessel;
+
+aX_vessel_mm = stG_vessel.aX * 1e3;
+aZ_vessel_mm = stG_vessel.aZ * 1e3;
+disp('Vessel grid re-mapped to PCI coordinate system:');
+disp(['Vessel X range: ', num2str(aX_vessel_mm(1)), ' ~ ', num2str(aX_vessel_mm(end)), ' mm']);
+disp(['Vessel Z range: ', num2str(aZ_vessel_mm(1)), ' ~ ', num2str(aZ_vessel_mm(end)), ' mm']);
 
 %% ================ 이미지 보간 (해상도 맞추기) ================
 disp('Interpolating images...');

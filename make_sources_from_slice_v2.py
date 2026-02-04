@@ -9,16 +9,23 @@ P.mat에서 FUS 설정을 읽어와서 source를 생성하는 통합 스크립�
 import os
 import numpy as np
 from scipy.io import loadmat, savemat
-
+import argparse
+import matplotlib.pyplot as plt
 # =============================================================================
 # Configuration
 # =============================================================================
 # Use __file__ based paths for robustness
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-P_MAT = os.path.join(_SCRIPT_DIR, "P.mat")
+
+# 모든 데이터는 Data_tus/01_sim 경로에서 처리
+DATA_DIR = os.path.join(_SCRIPT_DIR, "Data_tus", "01_sim")
+P_MAT = os.path.join(DATA_DIR, "P.mat")
 SLICE_DIR = os.path.join(_SCRIPT_DIR, "vessel_sweep_out")
-SLICE_IDX = 14
-OUT_MAT = os.path.join(_SCRIPT_DIR, "sources.mat")
+
+OUT_MAT = os.path.join(DATA_DIR, "sources.mat")
+
+# Data 폴더 생성
+os.makedirs(DATA_DIR, exist_ok=True)
 
 # vessel mask 픽셀 간격 (um) - make_sweep_hi3um.py와 일치시켜야 함
 PIXEL_UM = 3.0
@@ -32,6 +39,59 @@ SIGMA_MM = 0.6
 # stable vs inertial 비율 파라미터
 INERTIAL_BASE = 0.2   # focus 밖에서 inertial 비율
 INERTIAL_MAX = 0.8    # focus 중심에서 inertial 비율
+def pick_point_on_image(img2d, x_mm, z_mm, title):
+    """
+    img2d: (nz,nx)
+    x_mm: (nx,) axis in mm
+    z_mm: (nz,) axis in mm
+    Returns (x_mm, z_mm) or None (ESC)
+    """
+    picked = {"pt": None}
+
+    fig, ax = plt.subplots()
+    ax.imshow(
+        img2d,
+        extent=[x_mm[0], x_mm[-1], z_mm[-1], z_mm[0]],  # keep z increasing downward visually
+        aspect="auto",
+    )
+    ax.set_title(title)
+    ax.set_xlabel("x (mm)")
+    ax.set_ylabel("z (mm)")
+    marker = ax.scatter([], [], s=80)
+
+    def on_click(event):
+        if event.inaxes != ax:
+            return
+        picked["pt"] = (float(event.xdata), float(event.ydata))
+        marker.set_offsets(np.array([[picked["pt"][0], picked["pt"][1]]]))
+        fig.canvas.draw_idle()
+
+    def on_key(event):
+        if event.key == "enter":
+            plt.close(fig)
+        elif event.key == "escape":
+            picked["pt"] = None
+            plt.close(fig)
+
+    cid1 = fig.canvas.mpl_connect("button_press_event", on_click)
+    cid2 = fig.canvas.mpl_connect("key_press_event", on_key)
+    plt.show()
+    fig.canvas.mpl_disconnect(cid1)
+    fig.canvas.mpl_disconnect(cid2)
+    return picked["pt"]
+
+
+def build_axes_from_stG(stG, nx, nz):
+    """
+    mask 픽셀 격자(nx,nz)를 PCI grid(stG.aX/aZ) 범위(mm)에 선형 매핑.
+    overlay/PCI 좌표 불일치 문제를 줄이기 위해 click 모드 기본으로 사용.
+    """
+    aX = np.array(stG["aX"]).reshape(-1) * 1000.0  # m -> mm
+    aZ = np.array(stG["aZ"]).reshape(-1) * 1000.0  # m -> mm
+    x_mm = np.linspace(aX.min(), aX.max(), nx, dtype=np.float32)
+    z_mm = np.linspace(aZ.min(), aZ.max(), nz, dtype=np.float32)
+    return x_mm, z_mm
+
 
 # =============================================================================
 # Helper: MATLAB struct -> dict
@@ -55,11 +115,29 @@ def load_P(path):
     md = loadmat(path, squeeze_me=True, struct_as_record=False)
     return mat_struct_to_dict(md["P"])
 
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--slice-idx", type=int, default=14, help="vessel slice index (mask_####.npy)")
+    p.add_argument("--out-mat", type=str, default=OUT_MAT, help="output sources.mat path")
+    p.add_argument("--n-sources", type=int, default=N_SOURCES, help="number of sources (sampling mode)")
+    p.add_argument("--sigma-mm", type=float, default=SIGMA_MM, help="focus gaussian sigma (mm)")
+    p.add_argument("--click", action="store_true", help="click a point on the slice to place FUS source")
+    p.add_argument("--single-point", action="store_true",
+                   help="if set with --click, save exactly 1 point source at the clicked location")
+    p.add_argument("--amp", type=float, default=1.0, help="amplitude for single-point mode (overrides radf)")
+    p.add_argument("--src-type", type=int, default=1, choices=[0,1],
+                   help="0=stable, 1=inertial (single-point mode)")
+    return p.parse_args()
 
 # =============================================================================
 # Main
 # =============================================================================
 def main():
+    args = parse_args()
+    SLICE_IDX = int(args.slice_idx)
+    OUT_PATH = args.out_mat
+    K_default = int(args.n_sources)
+    sigma_mm = float(args.sigma_mm)
     # -------------------------------------------------------------------------
     # 1. P.mat에서 FUS 설정 로드
     # -------------------------------------------------------------------------
@@ -120,28 +198,66 @@ def main():
     # -------------------------------------------------------------------------
     # 3. 좌표 그리드 생성 (pixel -> mm)
     # -------------------------------------------------------------------------
-    um_to_mm = 1e-3
-    
-    # x: 중앙 기준 (0이 중앙)
-    x_mm = (np.arange(nx) - nx / 2.0) * PIXEL_UM * um_to_mm
-    
-    # z: P.mat의 focus 깊이에 맞춰서 offset 조정
-    # vessel mask의 z 범위가 focus 근처에 오도록 함
-    z_raw_mm = np.arange(nz) * PIXEL_UM * um_to_mm  # 0부터 시작
-    
-    # z offset: focus가 mask 중앙에 오도록
-    z_mask_center = z_raw_mm[nz // 2]
-    z_offset = z0_mm - z_mask_center
-    z_mm = z_raw_mm + z_offset
-    
-    print(f"\nCoordinate mapping:")
-    print(f"  X range: {x_mm.min():.2f} ~ {x_mm.max():.2f} mm")
-    print(f"  Z range (raw): {z_raw_mm.min():.2f} ~ {z_raw_mm.max():.2f} mm")
-    print(f"  Z offset to match focus: {z_offset:.2f} mm")
-    print(f"  Z range (adjusted): {z_mm.min():.2f} ~ {z_mm.max():.2f} mm")
-    
+    # CLICK 모드에서는 overlay/PCI 좌표 일치를 위해 stG 범위(mm)로 선형 매핑
+    if args.click:
+        x_mm, z_mm = build_axes_from_stG(stG, nx=nx, nz=nz)
+        print("\nCoordinate mapping (CLICK mode, stG-aligned):")
+        print(f"  X range: {x_mm.min():.2f} ~ {x_mm.max():.2f} mm")
+        print(f"  Z range: {z_mm.min():.2f} ~ {z_mm.max():.2f} mm")
+    else:
+        # 기존 방식(픽셀 기반 + focus에 맞춘 z_offset)
+        um_to_mm = 1e-3
+        x_mm = (np.arange(nx) - nx / 2.0) * PIXEL_UM * um_to_mm
+        z_raw_mm = np.arange(nz) * PIXEL_UM * um_to_mm
+        z_mask_center = z_raw_mm[nz // 2]
+        z_offset = z0_mm - z_mask_center
+        z_mm = z_raw_mm + z_offset
+        print(f"\nCoordinate mapping (legacy pixel->mm):")
+        print(f"  X range: {x_mm.min():.2f} ~ {x_mm.max():.2f} mm")
+        print(f"  Z range (raw): {z_raw_mm.min():.2f} ~ {z_raw_mm.max():.2f} mm")
+        print(f"  Z offset to match focus: {z_offset:.2f} mm")
+        print(f"  Z range (adjusted): {z_mm.min():.2f} ~ {z_mm.max():.2f} mm")
     XX, ZZ = np.meshgrid(x_mm, z_mm)
-    
+    # -------------------------------------------------------------------------
+    # 3.5 Click to choose a point (override focus / sources)
+    # -------------------------------------------------------------------------
+    if args.click:
+        # background to show: vessel intensity masked
+        bg = (vint * mask.astype(np.float32))
+        pt = pick_point_on_image(
+            bg,
+            x_mm=x_mm,
+            z_mm=z_mm,
+            title=f"Slice #{SLICE_IDX}: click source, Enter=save, Esc=cancel"
+        )
+        if pt is None:
+            print("[CANCEL] No point selected.")
+            return
+        x0_mm, z0_mm = pt
+        foci_x_mm = np.array([x0_mm], dtype=np.float32)
+        foci_z_mm = np.array([z0_mm], dtype=np.float32)
+        n_foci = 1
+        print(f"[CLICK] Selected point: x={x0_mm:.3f} mm, z={z0_mm:.3f} mm")
+
+        if args.single_point:
+            # Save exactly one point source
+            out_data = {
+                "src_x_mm": np.array([x0_mm], dtype=np.float32),
+                "src_z_mm": np.array([z0_mm], dtype=np.float32),
+                "src_amp": np.array([float(args.amp)], dtype=np.float32),
+                "src_type": np.array([int(args.src_type)], dtype=np.uint8),
+                "foci_x_mm": foci_x_mm.astype(np.float32),
+                "foci_z_mm": foci_z_mm.astype(np.float32),
+                "x0_mm": np.float32(x0_mm),
+                "z0_mm": np.float32(z0_mm),
+                "n_foci": np.int32(n_foci),
+                "sigma_mm": np.float32(sigma_mm),
+                "pixel_um": np.float32(PIXEL_UM),
+                "slice_idx": np.int32(SLICE_IDX),
+            }
+            savemat(OUT_PATH, out_data)
+            print(f"\n=== Saved single-point source: {OUT_PATH} ===")
+            return
     # -------------------------------------------------------------------------
     # 4. Focus 가중치 계산 (multi-foci 지원)
     # -------------------------------------------------------------------------
@@ -150,7 +266,7 @@ def main():
     
     for i in range(n_foci):
         fx, fz = foci_x_mm[i], foci_z_mm[i]
-        w_focus += np.exp(-((XX - fx)**2 + (ZZ - fz)**2) / (2 * SIGMA_MM**2))
+        w_focus += np.exp(-((XX - fx)**2 + (ZZ - fz)**2) / (2 * sigma_mm**2))
     
     # 정규화
     w_focus = w_focus / (w_focus.max() + 1e-12)
@@ -169,7 +285,7 @@ def main():
     w_flat[w_flat < 0] = 0.0
     
     M = idx_all.size
-    K = min(N_SOURCES, M)
+    K = min(K_default, M)
     
     if M == 0:
         raise RuntimeError("Mask is empty! Check slice index or vessel data.")
@@ -232,14 +348,14 @@ def main():
         "n_foci": np.int32(n_foci),
         
         # 메타 정보
-        "sigma_mm": np.float32(SIGMA_MM),
+        "sigma_mm": np.float32(sigma_mm),
         "pixel_um": np.float32(PIXEL_UM),
         "slice_idx": np.int32(SLICE_IDX),
     }
     
-    savemat(OUT_MAT, out_data)
+    savemat(OUT_PATH, out_data)
     
-    print(f"\n=== Saved: {OUT_MAT} ===")
+    print(f"\n=== Saved: {OUT_PATH} ===")
     print(f"N sources: {K}")
     print(f"X range: {src_x_mm.min():.2f} ~ {src_x_mm.max():.2f} mm")
     print(f"Z range: {src_z_mm.min():.2f} ~ {src_z_mm.max():.2f} mm")

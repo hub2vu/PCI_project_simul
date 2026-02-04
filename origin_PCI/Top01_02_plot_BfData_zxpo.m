@@ -3,21 +3,21 @@
 %   NOTE: 이 스크립트는 BfData가 필요합니다 (시뮬레이션 데이터에는 없음)
 %
 clear; close all;
-addpath('../src');  % origin_PCI 폴더에서 실행하므로 ../src로 수정
+addpath('../src');
 
-folderidx = 1;  % 시뮬레이션 데이터용 (01_sim)
-stFolder = dir(['../Data_tus/' num2str(folderidx,'%02d') '*']);
-if isempty(stFolder)
-    error('Data_tus 폴더를 찾을 수 없습니다. 경로를 확인하세요: ../Data_tus/%02d*', folderidx);
+% Data_tus/01_sim 경로 직접 지정
+sessPath = '../Data_tus/01_sim';
+if ~exist(sessPath, 'dir')
+    error('데이터 폴더를 찾을 수 없습니다: %s', sessPath);
 end
-sFolderName = stFolder.name;
+sFolderName = '01_sim';
 
 % Load P
-load([stFolder.folder '/' stFolder.name '/P.mat'],'P');
+load(fullfile(sessPath, 'P.mat'), 'P');
 stG = P.CAV.stG;
 
 % Find the number of BfData
-stList = dir([stFolder.folder '/' stFolder.name '/BfData/' 'BfData_zxpo_bidx*']);
+stList = dir(fullfile(sessPath, 'BfData', 'BfData_zxpo_bidx*'));
 nNumBfData = numel(stList);
 
 figure;

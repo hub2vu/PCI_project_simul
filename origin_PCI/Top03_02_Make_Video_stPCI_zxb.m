@@ -4,13 +4,12 @@
 %
 clear; close all;
 
-% set folder
-folderidx = 1;  % 시뮬레이션 데이터용 (01_sim)
-stFolder = dir(['../Data_tus/' num2str(folderidx,'%02d') '*']);
-if isempty(stFolder)
-    error('Data_tus 폴더를 찾을 수 없습니다. 경로를 확인하세요: ../Data_tus/%02d*', folderidx);
+% Data_tus/01_sim 경로 직접 지정
+sessPath = '../Data_tus/01_sim';
+if ~exist(sessPath, 'dir')
+    error('데이터 폴더를 찾을 수 없습니다: %s', sessPath);
 end
-sFolderName = stFolder.name;
+sFolderName = '01_sim';
 
 % set param
 nEig_s = 10;
@@ -19,13 +18,13 @@ nEig_e = 90;
 sTag = ['_eig' num2str(nEig_s) 'to' num2str(nEig_e)];
 
 % load stPCI_zxb
-load([stFolder.folder '/' stFolder.name '/PciData/' 'stPCI_zxb' sTag '.mat'], 'stPCI');
+load(fullfile(sessPath, 'PciData', ['stPCI_zxb' sTag '.mat']), 'stPCI');
 stG = stPCI.stG;
 vPCI_zxb = stPCI.vPCI_zxb;
 
 % set entities for making video
 figure('color','w');
-sVideoName = [stFolder.folder '/' stFolder.name '/PciData/' 'PCI' sTag '_test'];
+sVideoName = fullfile(sessPath, 'PciData', ['PCI' sTag '_test']);
 disp(['Creating... ' sVideoName '.mp4']);
 vidObj = VideoWriter(sVideoName,'MPEG-4');
 vidObj.FrameRate = 10;

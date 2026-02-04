@@ -4,11 +4,11 @@
 % - mTxDelay_zx_m 패치 제거 (원래 P.mat 값 사용)
 % - make_sources_from_slice_v2.py + gen_rf_cuda_v3.py와 일관된 설정
 %
-% 폴더 구조:
-%   ./P.mat
-%   ./sources.mat
-%   ./RfData/RfData_spc_001.bin ...
-%   ./PciData/  (출력)
+% 폴더 구조 (Data_tus/01_sim 기준):
+%   ./Data_tus/01_sim/P.mat
+%   ./Data_tus/01_sim/sources.mat
+%   ./Data_tus/01_sim/RfData/RfData_spc_001.bin ...
+%   ./Data_tus/01_sim/PciData/  (출력)
 
 clear; close all; clc;
 addpath('src');
@@ -16,7 +16,12 @@ global P g
 g = gpuDevice();
 
 % ---- Session folder ----
-sess = pwd;  % 현재 폴더 사용
+% 모든 데이터는 Data_tus/01_sim 경로에서 처리
+sess = fullfile(pwd, 'Data_tus', '01_sim');
+if ~exist(sess, 'dir')
+    error('세션 폴더가 없습니다: %s\n먼저 gen_rf_cuda_v3.py를 실행하세요.', sess);
+end
+fprintf('Session folder: %s\n', sess);
 
 % ---- Load P.mat ----
 fprintf('Loading P.mat...\n');

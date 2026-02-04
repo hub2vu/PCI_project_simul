@@ -1,6 +1,6 @@
 make_sweep_hi3um.py
 view_sweep_like.py
 -----------
-make_sources_from_slice.py
-gen_rf_cuda.py
+python make_sources_from_slice_v2.py --slice-idx 14 --click --single-point --amp 1.0 --src-type 1
+python gen_rf_cuda_v3.py
 RunPCI_01_sim.m

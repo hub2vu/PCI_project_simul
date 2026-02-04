@@ -3,25 +3,25 @@
 %       + Save stPCI_zxb in 'PciData' folder
 %   2022-03-01
 %       Load stPCI and plot
-%   NOTE: 이 스크립트는 BfData 폴더의 실시간 stPCI 파일이 필요합니다
+%   NOTE: 이 스크립트는 BfData 폴더의 실시간 stPCI 파일이 필요합니다 (시뮬레이션에서는 사용 불가)
 %   
 clear;% close all;
 
-folderidx = 1;  % 시뮬레이션 데이터용 (01_sim)
-stFolder = dir(['../Data_tus/' num2str(folderidx,'%02d') '*']);
-if isempty(stFolder)
-    error('Data_tus 폴더를 찾을 수 없습니다. 경로를 확인하세요: ../Data_tus/%02d*', folderidx);
+% Data_tus/01_sim 경로 직접 지정
+sessPath = '../Data_tus/01_sim';
+if ~exist(sessPath, 'dir')
+    error('데이터 폴더를 찾을 수 없습니다: %s', sessPath);
 end
-sFolderName = stFolder.name;
+sFolderName = '01_sim';
 
 % Load P
-load([stFolder.folder '/' stFolder.name '/P.mat'],'P');
+load(fullfile(sessPath, 'P.mat'), 'P');
 
 % Get a list of stPCI
-stList = dir([stFolder.folder '/' stFolder.name '/BfData/' 'stPCI_*']);
+stList = dir(fullfile(sessPath, 'BfData', 'stPCI_*'));
 
 %  PciData path
-sPciPath = [stFolder.folder '/' stFolder.name '/PciData/'];
+sPciPath = fullfile(sessPath, 'PciData');
 if ~exist(sPciPath,'dir'); mkdir(sPciPath); end
 
 figure;
