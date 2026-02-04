@@ -5,23 +5,41 @@
 % 뇌 혈관 슬라이스 이미지와 PCI를 오버레이하여 비디오 생성
 % make_sources_from_slice.py에서 사용한 SLICE_IDX와 동일한 슬라이스 사용
 %
+% 사용법:
+%   1. 프로젝트 루트 구조: P.mat, RfData/, PciData/, vessel_sweep_out/이 루트에 있음
+%   2. DATA_ROOT를 빈 문자열로 두면 프로젝트 루트 구조 사용
+%
 clear; close all;
-addpath('../src');
+
+% ====== 경로 설정 ======
+scriptDir = fileparts(mfilename('fullpath'));
+projectRoot = fileparts(scriptDir);  % origin_PCI의 상위 폴더 = 프로젝트 루트
+
+addpath(fullfile(projectRoot, 'src'));
 
 %% ================ 설정 ================
 % 시뮬레이션에 사용된 슬라이스 인덱스 (make_sources_from_slice.py의 SLICE_IDX와 일치)
 SLICE_IDX = 14;
 
-% 혈관 슬라이스 데이터 경로
-sVesselDir = '../vessel_sweep_out';
+% ====== 데이터 경로 설정 ======
+DATA_ROOT = '';  % 빈 문자열이면 프로젝트 루트 사용
 
-% PCI 데이터 경로
-folderidx = 1;  % 01_sim
-stFolder = dir(['../Data_tus/' num2str(folderidx,'%02d') '*']);
-if isempty(stFolder)
-    error('Data_tus 폴더를 찾을 수 없습니다.');
+if isempty(DATA_ROOT)
+    % 프로젝트 루트 구조
+    dataFolder = projectRoot;
+    sFolderName = 'sim';
+    sVesselDir = fullfile(projectRoot, 'vessel_sweep_out');
+else
+    % Data_tus 구조
+    folderidx = 1;
+    stFolder = dir(fullfile(DATA_ROOT, [num2str(folderidx,'%02d') '*']));
+    if isempty(stFolder)
+        error('Data 폴더를 찾을 수 없습니다: %s/%02d*', DATA_ROOT, folderidx);
+    end
+    dataFolder = fullfile(stFolder.folder, stFolder.name);
+    sFolderName = stFolder.name;
+    sVesselDir = fullfile(projectRoot, 'vessel_sweep_out');
 end
-sFolderName = stFolder.name;
 
 %% ================ 좌표계 오프셋 계산 (sources.mat 기반) ================
 % sources.mat에서 실제 사용된 소스 좌표 범위를 읽어서 오프셋 계산
@@ -31,7 +49,7 @@ sFolderName = stFolder.name;
 % Vessel Z축: 뇌 표면 기준 (0mm에서 시작)
 
 % sources.mat 로드하여 FUS focus 정보 확인
-sSourcesFile = '../sources.mat';
+sSourcesFile = fullfile(projectRoot, 'sources.mat');
 if exist(sSourcesFile, 'file')
     stSources = load(sSourcesFile);
     nFocus_z0_mm = double(stSources.z0_mm);  % FUS focus Z 위치 (PCI 좌표계)
@@ -99,8 +117,12 @@ disp('Loading PCI data...');
 
 nPci_Eig_s = 10;
 nPci_Eig_e = 90;
-sPciPath = [stFolder.folder '/' stFolder.name '/PciData/'];
-load([sPciPath 'stPCI_zxb_eig' num2str(nPci_Eig_s) 'to' num2str(nPci_Eig_e) '.mat'], 'stPCI');
+sPciPath = fullfile(dataFolder, 'PciData');
+pciFile = fullfile(sPciPath, ['stPCI_zxb_eig' num2str(nPci_Eig_s) 'to' num2str(nPci_Eig_e) '.mat']);
+if ~exist(pciFile, 'file')
+    error('PCI 파일을 찾을 수 없습니다: %s', pciFile);
+end
+load(pciFile, 'stPCI');
 
 vPCI = stPCI.vPCI_zxb;
 vPCI = double(vPCI);
@@ -221,10 +243,10 @@ bVideo = 1;
 
 if bVideo
     % 비디오 출력 폴더
-    sVideoDir = [stFolder.folder '/' stFolder.name '/PciData/'];
+    sVideoDir = fullfile(dataFolder, 'PciData');
     if ~isfolder(sVideoDir); mkdir(sVideoDir); end
-    
-    sVideoName = [sVideoDir 'PCI_VesselOverlay_slice' num2str(SLICE_IDX,'%04d') '_eig' num2str(nPci_Eig_s) 'to' num2str(nPci_Eig_e)];
+
+    sVideoName = fullfile(sVideoDir, ['PCI_VesselOverlay_slice' num2str(SLICE_IDX,'%04d') '_eig' num2str(nPci_Eig_s) 'to' num2str(nPci_Eig_e)]);
     disp(['Creating... ' sVideoName '.mp4']);
     
     vidObj = VideoWriter(sVideoName, 'MPEG-4');
