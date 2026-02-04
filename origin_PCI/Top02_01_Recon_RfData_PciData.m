@@ -3,22 +3,49 @@
 %       Load RfData_*.bin files and beamforming
 %   Modified for simulation data
 %
+% 사용법:
+%   1. 프로젝트 루트에서 직접 실행: RunPCI_01_sim_v2.m 사용 권장
+%   2. origin_PCI 폴더에서 실행: 아래 DATA_ROOT 경로 설정 필요
+%
 clear; close all;
-addpath('../src');  % origin_PCI 폴더에서 실행하므로 ../src로 수정
+
+% ====== 경로 설정 ======
+% 스크립트 위치 기준 경로 자동 탐지
+scriptDir = fileparts(mfilename('fullpath'));
+projectRoot = fileparts(scriptDir);  % origin_PCI의 상위 폴더 = 프로젝트 루트
+
+addpath(fullfile(projectRoot, 'src'));
+
 global P g
 g = gpuDevice();
 
-% set folder
-folderidx = 1;
-stFolder = dir(['../Data_tus/' num2str(folderidx,'%02d') '*']);
-if isempty(stFolder)
-    error('Data_tus 폴더를 찾을 수 없습니다. 경로를 확인하세요: ../Data_tus/%02d*', folderidx);
-end
-sFolderName = stFolder.name;
+% ====== 데이터 경로 설정 ======
+% Option 1: 프로젝트 루트 구조 (P.mat이 루트에 있는 경우)
+% Option 2: Data_tus 구조 (기존 구조)
+DATA_ROOT = '';  % 빈 문자열이면 프로젝트 루트 사용
 
+if isempty(DATA_ROOT)
+    % 프로젝트 루트에서 데이터 찾기
+    dataFolder = projectRoot;
+    sFolderName = 'sim';
+
+    % P.mat 확인
+    if ~exist(fullfile(dataFolder, 'P.mat'), 'file')
+        error('P.mat을 찾을 수 없습니다: %s', fullfile(dataFolder, 'P.mat'));
+    end
+else
+    % Data_tus 구조 사용
+    folderidx = 1;
+    stFolder = dir(fullfile(DATA_ROOT, [num2str(folderidx,'%02d') '*']));
+    if isempty(stFolder)
+        error('Data 폴더를 찾을 수 없습니다: %s/%02d*', DATA_ROOT, folderidx);
+    end
+    dataFolder = fullfile(stFolder.folder, stFolder.name);
+    sFolderName = stFolder.name;
+end
 
 % Load P
-load([stFolder.folder '/' stFolder.name '/P']);
+load(fullfile(dataFolder, 'P.mat'), 'P');
 stRfInfo = P.CAV.stRfInfo;
 stTrans = P.stTrans;
 
@@ -49,9 +76,15 @@ P.CAV.mTxDelay_zx_m = imgaussfilt(P.CAV.mTxDelay_zx_m,2) - 2e-3;
 InitCuda_PCI();
 
 % Get a list of RfData
-stList = dir([stFolder.folder '/' stFolder.name '/RfData/' 'RfData_spc_*']);
+rfDataDir = fullfile(dataFolder, 'RfData');
+stList = dir(fullfile(rfDataDir, 'RfData_spc_*'));
 nNumBurst = numel(stList);
 P.CAV.stG.nBdim = nNumBurst;
+
+if nNumBurst == 0
+    error('RfData 파일을 찾을 수 없습니다: %s', rfDataDir);
+end
+fprintf('Found %d RF data files.\n', nNumBurst);
 
 % Run external initialize function for PCI
 ExtInit_PCI();
@@ -60,19 +93,24 @@ ExtInit_PCI();
 vPCI_zxb = zeros([P.CAV.stG.nZdim, P.CAV.stG.nXdim, P.CAV.stG.nBdim]);
 for bidx = 1:numel(stList)
     % load RfData
-    mRfData_spc = binload([stList(bidx).folder '/' stList(bidx).name], 'int16', [stRfInfo.nSample*P.FUS.nNumPulse, stRfInfo.nChannel]);
-    
+    rfFile = fullfile(stList(bidx).folder, stList(bidx).name);
+    mRfData_spc = binload(rfFile, 'int16', [stRfInfo.nSample*P.FUS.nNumPulse, stRfInfo.nChannel]);
+
     % Run external processing function for PCI
     ExtRun_PCI(mRfData_spc); % it will stack each mPCI_zx into vPCI_zxb
-        
+
 end
 
-mkdir([stFolder.folder '/' stFolder.name '/PciData/']);
+% Output directory
+pciDataDir = fullfile(dataFolder, 'PciData');
+if ~exist(pciDataDir, 'dir')
+    mkdir(pciDataDir);
+end
 
 stPCI.stG = P.CAV.stG;
 stPCI.vPCI_zxb = vPCI_zxb;
 sTag = ['_eig' num2str(P.CAV.nEig_s) 'to' num2str(P.CAV.nEig_e)];
-save([stFolder.folder '/' stFolder.name '/PciData/' 'stPCI_zxb' sTag '.mat'], 'stPCI');
+save(fullfile(pciDataDir, ['stPCI_zxb' sTag '.mat']), 'stPCI');
 
 
 % 

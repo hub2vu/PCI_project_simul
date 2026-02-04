@@ -13,10 +13,12 @@ from scipy.io import loadmat, savemat
 # =============================================================================
 # Configuration
 # =============================================================================
-P_MAT = r"./P.mat"
-SLICE_DIR = r"./vessel_sweep_out"
+# Use __file__ based paths for robustness
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+P_MAT = os.path.join(_SCRIPT_DIR, "P.mat")
+SLICE_DIR = os.path.join(_SCRIPT_DIR, "vessel_sweep_out")
 SLICE_IDX = 14
-OUT_MAT = r"./sources.mat"
+OUT_MAT = os.path.join(_SCRIPT_DIR, "sources.mat")
 
 # vessel mask 픽셀 간격 (um) - make_sweep_hi3um.py와 일치시켜야 함
 PIXEL_UM = 3.0
