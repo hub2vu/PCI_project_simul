@@ -10,7 +10,7 @@ addpath('../src');
 
 %% ================ 설정 ================
 % 시뮬레이션에 사용된 슬라이스 인덱스 (make_sources_from_slice.py의 SLICE_IDX와 일치)
-SLICE_IDX = 0;
+SLICE_IDX = 14;
 
 % 혈관 슬라이스 데이터 경로
 sVesselDir = '../vessel_sweep_out';
@@ -22,6 +22,35 @@ if isempty(stFolder)
     error('Data_tus 폴더를 찾을 수 없습니다.');
 end
 sFolderName = stFolder.name;
+
+%% ================ 좌표계 오프셋 계산 (sources.mat 기반) ================
+% sources.mat에서 실제 사용된 소스 좌표 범위를 읽어서 오프셋 계산
+% 이렇게 하면 시뮬레이션에서 사용한 좌표계와 정확히 일치
+%
+% PCI Z축: 트랜스듀서로부터의 깊이 (약 1.58mm에서 시작)
+% Vessel Z축: 뇌 표면 기준 (0mm에서 시작)
+
+% sources.mat 로드하여 FUS focus 정보 확인
+sSourcesFile = '../sources.mat';
+if exist(sSourcesFile, 'file')
+    stSources = load(sSourcesFile);
+    nFocus_z0_mm = double(stSources.z0_mm);  % FUS focus Z 위치 (PCI 좌표계)
+    src_z_range = [min(stSources.src_z_mm), max(stSources.src_z_mm)];
+    disp(['Sources.mat loaded: FUS focus z0 = ', num2str(nFocus_z0_mm), ' mm']);
+    disp(['Source Z range: ', num2str(src_z_range(1)), ' ~ ', num2str(src_z_range(2)), ' mm']);
+    
+    % 오프셋 자동 계산: 소스의 Z 중심이 PCI 영역 중심과 맞도록
+    % (또는 수동으로 조정 가능)
+    nZoffset_mm = mean(src_z_range);  % 소스 Z 범위 중심 기준
+    disp(['Auto-calculated Z offset: ', num2str(nZoffset_mm), ' mm']);
+else
+    % sources.mat이 없으면 기본값 사용
+    nZoffset_mm = 3.5;
+    disp(['sources.mat not found. Using default Z offset: ', num2str(nZoffset_mm), ' mm']);
+end
+
+% 수동 오프셋 조정 (필요시 아래 값을 변경)
+% nZoffset_mm = 4.5;  % 수동 조정 값
 
 %% ================ 혈관 슬라이스 로드 ================
 disp('Loading vessel slice data...');
@@ -41,6 +70,7 @@ end
 
 % Python npy 파일 로드 (MATLAB에서 직접 로드)
 mVessel = readNPY(sVesselFile);
+mVessel = double(mVessel);
 [nZ_vessel, nX_vessel] = size(mVessel);
 
 % 좌표 계산 (make_sources_from_slice.py와 동일한 방식)
@@ -50,18 +80,19 @@ um_to_m = 1e-6;
 
 % x 좌표: 중심 기준 (mm)
 aX_vessel_mm = ((0:nX_vessel-1) - nX_vessel/2) * OUT_UM * um_to_mm;
-% z 좌표: 0부터 시작 (mm)
-aZ_vessel_mm = (0:nZ_vessel-1) * OUT_UM * um_to_mm;
+% z 좌표: 0부터 시작 (mm) + 오프셋 적용
+aZ_vessel_mm = (0:nZ_vessel-1) * OUT_UM * um_to_mm + nZoffset_mm;
 
 % 그리드 구조체 생성 (interpImg 호환용)
-stG_vessel.aX = aX_vessel_mm * 1e-3;  % m 단위
-stG_vessel.aZ = aZ_vessel_mm * 1e-3;  % m 단위
+stG_vessel.aX = double(aX_vessel_mm * 1e-3);  % [수정] double 강제 형변환
+stG_vessel.aZ = double(aZ_vessel_mm * 1e-3);
 stG_vessel.nXdim = nX_vessel;
 stG_vessel.nZdim = nZ_vessel;
 
 disp(['Vessel slice loaded: ', num2str(nZ_vessel), ' x ', num2str(nX_vessel)]);
 disp(['X range: ', num2str(aX_vessel_mm(1)), ' ~ ', num2str(aX_vessel_mm(end)), ' mm']);
-disp(['Z range: ', num2str(aZ_vessel_mm(1)), ' ~ ', num2str(aZ_vessel_mm(end)), ' mm']);
+disp(['Z range (with offset): ', num2str(aZ_vessel_mm(1)), ' ~ ', num2str(aZ_vessel_mm(end)), ' mm']);
+disp(['Z offset applied: ', num2str(nZoffset_mm), ' mm']);
 
 %% ================ PCI 데이터 로드 ================
 disp('Loading PCI data...');
@@ -72,8 +103,18 @@ sPciPath = [stFolder.folder '/' stFolder.name '/PciData/'];
 load([sPciPath 'stPCI_zxb_eig' num2str(nPci_Eig_s) 'to' num2str(nPci_Eig_e) '.mat'], 'stPCI');
 
 vPCI = stPCI.vPCI_zxb;
+vPCI = double(vPCI);
 stG_pci = stPCI.stG;
+% [추가] 좌표축 double 변환 및 단위 보정 (mm -> m)
+stG_pci.aX = double(stG_pci.aX);
+stG_pci.aZ = double(stG_pci.aZ);
 
+% 만약 PCI 좌표가 mm 단위라면(값이 1보다 크다면) m 단위로 변환
+if max(abs(stG_pci.aX)) > 1.0
+    disp('Warning: stG_pci appears to be in mm. Converting to meters.');
+    stG_pci.aX = stG_pci.aX * 1e-3;
+    stG_pci.aZ = stG_pci.aZ * 1e-3;
+end
 disp(['PCI loaded: ', num2str(size(vPCI,1)), ' x ', num2str(size(vPCI,2)), ' x ', num2str(size(vPCI,3)), ' bursts']);
 disp(['PCI X range: ', num2str(stG_pci.aX(1)*1e3), ' ~ ', num2str(stG_pci.aX(end)*1e3), ' mm']);
 disp(['PCI Z range: ', num2str(stG_pci.aZ(1)*1e3), ' ~ ', num2str(stG_pci.aZ(end)*1e3), ' mm']);
@@ -95,10 +136,34 @@ end
 % Total PCI Intensity
 mPCI_itp_total = sum(vPCI_itp_zxb, 3);
 
-%% ================ FOV 설정 ================
-% PCI 범위 기준으로 FOV 설정
-aFOV = [stG_pci.aX(1)*1e3, stG_pci.aX(end)*1e3, stG_pci.aZ(1)*1e3, stG_pci.aZ(end)*1e3];
-disp(['FOV: X=[', num2str(aFOV(1)), ', ', num2str(aFOV(2)), '], Z=[', num2str(aFOV(3)), ', ', num2str(aFOV(4)), '] mm']);
+%% ================ FOV 설정 (두 이미지의 공통 영역) ================
+% PCI와 Vessel 이미지의 겹치는 영역 계산
+aX_pci_mm = stG_pci.aX * 1e3;
+aZ_pci_mm = stG_pci.aZ * 1e3;
+
+% 공통 X 범위
+x_common_min = max(aX_vessel_mm(1), aX_pci_mm(1));
+x_common_max = min(aX_vessel_mm(end), aX_pci_mm(end));
+
+% 공통 Z 범위
+z_common_min = max(aZ_vessel_mm(1), aZ_pci_mm(1));
+z_common_max = min(aZ_vessel_mm(end), aZ_pci_mm(end));
+
+aFOV = [x_common_min, x_common_max, z_common_min, z_common_max];
+
+disp('');
+disp('=== 좌표계 비교 ===');
+disp(['PCI X: ', num2str(aX_pci_mm(1), '%.2f'), ' ~ ', num2str(aX_pci_mm(end), '%.2f'), ' mm']);
+disp(['Vessel X: ', num2str(aX_vessel_mm(1), '%.2f'), ' ~ ', num2str(aX_vessel_mm(end), '%.2f'), ' mm']);
+disp(['PCI Z: ', num2str(aZ_pci_mm(1), '%.2f'), ' ~ ', num2str(aZ_pci_mm(end), '%.2f'), ' mm']);
+disp(['Vessel Z (with offset): ', num2str(aZ_vessel_mm(1), '%.2f'), ' ~ ', num2str(aZ_vessel_mm(end), '%.2f'), ' mm']);
+disp(['Common FOV: X=[', num2str(aFOV(1), '%.2f'), ', ', num2str(aFOV(2), '%.2f'), '], Z=[', num2str(aFOV(3), '%.2f'), ', ', num2str(aFOV(4), '%.2f'), '] mm']);
+
+% 공통 영역이 없으면 경고
+if x_common_min >= x_common_max || z_common_min >= z_common_max
+    warning('PCI와 Vessel 이미지의 겹치는 영역이 없습니다! Z 오프셋(nZoffset_mm)을 조정하세요.');
+    disp('Tip: sources.mat의 src_z_mm 범위와 PCI Z 범위를 비교하여 오프셋 결정');
+end
 
 %% ================ Total PCI Intensity 플롯 ================
 disp('Plotting Total PCI Intensity with Vessel Overlay...');
