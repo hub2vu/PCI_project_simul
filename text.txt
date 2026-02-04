@@ -1,7 +1,5 @@
 make_sweep_hi3um.py
-
 view_sweep_like.py
-
 make_sources_from_slice.py
-Sim_Gen_RfData_spc_FromSources.m
+gen_rf_cuda.py
 RunPCI_01_sim.m
